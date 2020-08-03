@@ -1,0 +1,368 @@
+---
+title: "Data Preprocessing & DESeq2 Import"
+author: "Martin Gordon"
+date: "8/3/2020"
+output: html_document
+---
+
+Files supplied as count data in excel format. 
+Clean up and DESeq2 import
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Packages 
+
+```{R, messages=F}
+library(tximport)
+library(biomaRt)
+library(rio)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(DESeq2)
+```
+
+#Sample table for count data 
+
+```{r}
+sample_table <- as.data.frame(matrix(data = c(
+  "MCF7_miR-CTRL1.gene.FPKM", "MCF7_miR-CTRL2.gene.FPKM", "MCF7_miR-CTRL3.gene.FPKM","MCF7_miR-CTRL4.gene.FPKM",   "MCF7_miR-D1.gene.FPKM", "MCF7_miR-D2.gene.FPKM", "MCF7_miR-D3.gene.FPKM", "MCF7_miR-D4.gene.FPKM", 
+  "Control", "Control", "Control", "Control", "Mutant",  "Mutant",  "Mutant",  "Mutant",
+   "1",  "2", "3", "4", "1",  "2", "3", "4", 
+  "~/Documents/MSC_project/data/MCF7_miR-CTRL1.gene.FPKM.xls",  "~/Documents/MSC_project/data/MCF7_miR-CTRL2.gene.FPKM.xls",
+  "~/Documents/MSC_project/data/MCF7_miR-CTRL3.gene.FPKM.xls", "~/Documents/MSC_project/data/MCF7_miR-CTRL4.gene.FPKM.xls",
+  "~/Documents/MSC_project/data/MCF7_miR-D1.gene.FPKM.xls", "~/Documents/MSC_project/data/MCF7_miR-D2.gene.FPKM.xls", "~/Documents/MSC_project/data/MCF7_miR-D3.gene.FPKM.xls", "~/Documents/MSC_project/data/MCF7_miR-D4.gene.FPKM.xls"), 
+  nrow=8, ncol=4))
+
+colnames(samples_eg) <- c("Sample", "Condition", "Replicate", "FilePath")
+```
+
+# clean up & calculate TPM
+#(use loop to tidy)
+```{r}
+CTRL1 <- read.csv(paste(samples_eg$FilePath[1]), header=T, sep="\t")
+
+colnames(CTRL1) <- c("gene_id", "transcript_id", "effective_length", "expected_count", "FPKM")
+
+#this basically splits out the transcript IDs and gives them a seperate column each
+
+CTRL1$transcript_id <- as.character(CTRL1$transcript_id)
+
+get_first_item <- function(x){
+  split <- strsplit(x, ",")
+  return(split[[1]][1])
+}
+
+for(i in 1:nrow(CTRL1)){
+  row <- CTRL1[i,]
+  tx_list <- row$transcript_id
+  item <- get_first_item(tx_list)
+  CTRL1[i,2] <- item
+}
+
+#calculate TPM from FPKM; (provided by Colin Dewley of RSEM)
+#https://groups.google.com/forum/#!topic/rsem-users/W9RQrZIOzA4
+  
+#have checked values sum to million
+
+CTRL1$TPM= ( CTRL1$FPKM / sum(CTRL1$FPKM) * 10^6)
+
+write.table(x = CTRL1, file = '~/Documents/MSC_project/data/cleaned_files/CTRL1_cleaned.xls', sep ='\t', col.names = T, row.names = F)
+
+dim(CTRL1)
+```
+
+
+```{r}
+
+CTRL2 <- read.csv(paste(samples_eg$FilePath[2]), header=T, sep="\t")
+
+colnames(CTRL2) <- c("gene_id", "transcript_id", "effective_length", "expected_count", "FPKM")
+
+
+CTRL2$transcript_id <- as.character(CTRL2$transcript_id)
+
+
+for(i in 1:nrow(CTRL2)){
+  row <- CTRL2[i,]
+  tx_list <- row$transcript_id
+  item <- get_first_item(tx_list)
+  CTRL2[i,2] <- item
+}
+
+CTRL2$TPM= ( CTRL2$FPKM / sum(CTRL2$FPKM) * 10^6)
+
+write.table(x = CTRL2, file = '~/Documents/MSC_project/data/cleaned_files/CTRL2_cleaned.xls', sep ='\t', col.names = T, row.names = F)
+
+dim(CTRL2)
+```
+
+```{r}
+CTRL3 <- read.csv(paste(samples_eg$FilePath[3]), header=T, sep="\t")
+
+colnames(CTRL3) <- c("gene_id", "transcript_id", "effective_length", "expected_count", "FPKM")
+dim(CTRL3)
+
+CTRL3$transcript_id <- as.character(CTRL3$transcript_id)
+
+for(i in 1:nrow(CTRL3)){
+  row <- CTRL3[i,]
+  tx_list <- row$transcript_id
+  item <- get_first_item(tx_list)
+  CTRL3[i,2] <- item
+}
+
+CTRL3$TPM= ( CTRL3$FPKM / sum(CTRL3$FPKM) * 10^6)
+
+write.table(x = CTRL3, file = '~/Documents/MSC_project/data/cleaned_files/CTRL3_cleaned.xls', sep ='\t', col.names = T, row.names = F)
+
+dim(CTRL3)
+```
+
+```{r}
+CTRL4 <- read.csv(paste(samples_eg$FilePath[4]), header=T, sep="\t")
+
+colnames(CTRL4) <- c("gene_id", "transcript_id", "effective_length", "expected_count", "FPKM")
+dim(CTRL4)
+
+CTRL4$transcript_id <- as.character(CTRL4$transcript_id)
+
+for(i in 1:nrow(CTRL4)){
+  row <- CTRL4[i,]
+  tx_list <- row$transcript_id
+  item <- get_first_item(tx_list)
+  CTRL4[i,2] <- item
+}
+
+
+CTRL4$TPM= ( CTRL4$FPKM / sum(CTRL4$FPKM) * 10^6)
+
+write.table(x = CTRL4, file = '~/Documents/MSC_project/data/cleaned_files/CTRL4_cleaned.xls', sep ='\t', col.names = T, row.names = F)
+
+dim(CTRL4)
+```
+
+```{r}
+MUT1 <- read.csv(paste(samples_eg$FilePath[5]), header=T, sep="\t")
+
+colnames(MUT1) <- c("gene_id", "transcript_id", "effective_length", "expected_count", "FPKM")
+dim(MUT1)
+
+MUT1$transcript_id <- as.character(MUT1$transcript_id)
+
+for(i in 1:nrow(MUT1)){
+  row <- MUT1[i,]
+  tx_list <- row$transcript_id
+  item <- get_first_item(tx_list)
+  MUT1[i,2] <- item
+}
+
+MUT1$TPM= ( MUT1$FPKM / sum(MUT1$FPKM) * 10^6)
+
+write.table(x = MUT1, file = '~/Documents/MSC_project/data/cleaned_files/MUT1_cleaned.xls', sep ='\t', col.names = T, row.names = F)
+
+dim(MUT1)
+```
+
+```{r}
+MUT2 <- read.csv(paste(samples_eg$FilePath[6]), header=T, sep="\t")
+
+colnames(MUT2) <- c("gene_id", "transcript_id", "effective_length", "expected_count", "FPKM")
+dim(MUT2)
+
+MUT2$transcript_id <- as.character(MUT2$transcript_id)
+
+for(i in 1:nrow(MUT2)){
+  row <- MUT2[i,]
+  tx_list <- row$transcript_id
+  item <- get_first_item(tx_list)
+  MUT2[i,2] <- item
+}
+
+MUT2$TPM= ( MUT2$FPKM / sum(MUT2$FPKM) * 10^6)
+
+write.table(x = MUT2, file = '~/Documents/MSC_project/data/cleaned_files/MUT2_cleaned.xls', sep ='\t', col.names = T, row.names = F)
+
+
+dim(MUT2)
+```
+
+```{r}
+MUT3 <- read.csv(paste(samples_eg$FilePath[7]), header=T, sep="\t")
+
+colnames(MUT3) <- c("gene_id", "transcript_id", "effective_length", "expected_count", "FPKM")
+dim(MUT3)
+
+MUT3$transcript_id <- as.character(MUT3$transcript_id)
+
+for(i in 1:nrow(MUT3)){
+  row <- MUT3[i,]
+  tx_list <- row$transcript_id
+  item <- get_first_item(tx_list)
+  MUT3[i,2] <- item
+}
+
+MUT3$TPM= ( MUT3$FPKM / sum(MUT3$FPKM) * 10^6)
+
+write.table(x = MUT3, file = '~/Documents/MSC_project/data/cleaned_files/MUT3_cleaned.xls', sep ='\t', col.names = T, row.names = F)
+
+dim(MUT3)
+```
+
+```{r}
+MUT4 <- read.csv(paste(samples_eg$FilePath[8]), header=T, sep="\t")
+
+colnames(MUT4) <- c("gene_id", "transcript_id", "effective_length", "expected_count", "FPKM")
+dim(MUT4)
+
+MUT4$transcript_id <- as.character(MUT4$transcript_id)
+
+for(i in 1:nrow(MUT4)){
+  row <- MUT4[i,]
+  tx_list <- row$transcript_id
+  item <- get_first_item(tx_list)
+  MUT4[i,2] <- item
+}
+
+MUT4$TPM= ( MUT4$FPKM / sum(MUT4$FPKM) * 10^6)
+
+
+write.table(x = MUT4, file = '~/Documents/MSC_project/data/cleaned_files/MUT4_cleaned.xls', sep ='\t', col.names = T, row.names = F)
+
+dim(MUT4)
+```
+
+#count files different lengths (no of genes)
+#find intersection 
+
+
+```{r}
+#find the intersection of the files...
+intersc <- intersect(intersect(intersect(intersect(intersect(intersect(intersect(CTRL1$gene_id, CTRL2$gene_id),CTRL3$gene_id), CTRL4$gene_id), MUT1$gene_id), MUT2$gene_id), MUT3$gene_id), MUT4$gene_id)
+
+#used this to filter the indiv files.. clean up with loop
+
+CTRL1 <- CTRL1[CTRL1$gene_id %in% intersc, ]
+CTRL1
+
+CTRL2 <- CTRL2[CTRL2$gene_id %in% intersc, ]
+CTRL2
+
+CTRL3 <- CTRL3[CTRL3$gene_id %in% intersc, ]
+CTRL3
+
+CTRL4 <- CTRL4[CTRL4$gene_id %in% intersc, ]
+CTRL4
+
+MUT1 <- MUT1[MUT1$gene_id %in% intersc, ]
+MUT1
+
+MUT2 <- MUT2[MUT2$gene_id %in% intersc, ]
+MUT2
+
+MUT3 <-  MUT3[MUT3$gene_id %in% intersc, ]
+MUT3
+
+MUT4 <- MUT4[MUT4$gene_id %in% intersc, ]
+MUT4
+
+```
+
+# The tximport package converts transcript abundance to gene counts
+# make tx2gene
+#biomart interface to access data from public repositories
+# select the refseq_mrna and gene name from the biomart anotation files 
+```{r}
+#biomart ensembl database and human dataset
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")
+
+
+bimrt <- getBM(attributes = c("entrezgene_id", "refseq_mrna", "external_gene_name"), mart = mart)
+
+
+#getting a biomart query and selecting the attributes for gene name and mrna name
+results <- getBM(attributes = c("refseq_mrna", "external_gene_name"), mart = mart)
+
+#change to ensemble_trans
+#results <- getBM(attributes = c("ensembl_transcript_id", "external_gene_name"), mart = mart)
+results
+
+str(results)
+head(results)
+```
+
+# The tximport package converts transcript abundance to gene counts
+```{r}
+tx2gene <- results[, 1:2]
+
+
+quantData <- c(
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/CTRL1_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/CTRL2_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/CTRL3_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/CTRL4_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/MUT1_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/MUT2_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/MUT3_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/MUT4_cleaned.xls')
+
+
+files <- file.path(quantData)
+
+files
+
+names(files) <- c("MCF7_Ctrl_1","MCF7_Ctrl_2","MCF7_Ctrl_3", "MCF7_Ctrl_4",  "MCF7_miR.17.92_1", "MCF7_miR.17.92_2", "MCF7_miR.17.92_3", "MCF7_miR.17.92_4")
+
+
+##
+#txi <- tximport(files, type = "none", tx2gene = tx2gene, abundanceCol = "TPM", countsCol = "expected_count", lengthCol = "effective_length",  txIdCol = "transcript_id", importer = function(x) read.csv(x, sep = '\t', header=T))
+
+#tximport command...gene level info 16k genes
+gene_txi <- tximport(files, type = "none", tx2gene = tx2gene,abundanceCol = "TPM", countsCol = "expected_count", lengthCol = "effective_length",  txIdCol = "transcript_id", ignoreTxVersion = T, txIn = F, geneIdCol = 'gene_id', importer = function(x) read_tsv(x, col_names =T))
+
+```
+
+Some QC and DESeq2 Import
+
+```{r}
+
+colnames(gene_txi$counts)
+rownames(sample_table) <- sample_table$Sample
+rownames(sample_table)
+
+#check sample labels to ensure ordered correctly ie. control first level
+levels(sample_table$Condition)
+
+
+#check millions of fragments uniquely aligned to genes in each sample - no large deviances
+round(colSums(gene_txi$counts) / 1e6, 1 )
+
+### Check that sample names match in both files
+all(colnames(gene_txi$counts) %in% rownames(sample_table))
+all(colnames(gene_txi$counts) == rownames(sample_table))
+
+
+dds <- DESeqDataSetFromTximport(txi = gene_txi,
+                                       colData = sample_table,
+                                       design = ~ Condition 
+                                       )
+
+#size factors NULL.. try working straight from rounded matrix of counts ie import directly to DESeq2
+
+countData <- round(gene_txi$counts)
+
+dds <- DESeqDataSetFromMatrix(countData = countData,
+                              colData = sample_table,
+                              design = ~ Condition)
+
+
+#ensure control is the reference
+dds$Condition <- relevel(dds$Condition, ref = "Control")
+dds$Condition
+
+
+```
+

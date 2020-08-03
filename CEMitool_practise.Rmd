@@ -1,0 +1,100 @@
+---
+title: "CEMitool_(practise/tutorial)"
+author: "Martin Gordon"
+date: "8/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## CEMItool
+#Work with this tool; try the tutorial
+
+#load expression data: Use counts data prior to DESeq normalisation
+
+```{r}
+#these are the raw gene counts prior to any normalisation
+CEMi_raw <- as.data.frame(gene_txi$counts)
+
+#Use the trait data for the annotation file for module enrichment
+sample_annot <- traitData[,1:2]
+
+#rename columsn to sample name and condition (default for package functions)
+names(sample_annot) <- c('SampleName', 'Class')
+sample_annot
+
+#use gmt files downloaded from MSigDB for ORA, will use the BP (identifiers must match between the expression and gmt files so will user gmt with entrez identifiers)
+
+#read gmt to read in these files
+hallmark_bp <- read_gmt('~/Desktop/h.all.v7.1.entrez.gmt')
+
+#need to adjust the filltering on the gene set. Think this program automatically removes 25% of genes 
+#prior to analysis, filters genes based on low variance or mean expression, not DGE as invalidated scale free assumption
+
+#models genes as inverse gamma distribution and thresholds based on p-value
+#the package automatically removes the 25% of genes with the lowest mean expression.. can this be changed?
+#increasing p value threshold negatively affects enrichemnt analysis.. so it increases the amount of noise in the modules.. will try find modules with biological significance at lowest possible p value
+
+
+#high beta value needed for more stringent p values, cant find a beta value satisfying scale free topology for more stringent p values
+#cant satisfy scale free topology with pval <0.1, so made to pval <0.15
+#applied a variant stabilising transformation of data to make it more normally distributed
+
+cem <- cemitool(CEMi_raw, sample_annot, hallmark_bp, filter = T, filter_pval = 0.15, apply_vst = T, cor_function = 'bicor', network_type = 'signed', verbose = T, plot = T) 
+
+nmodules(cem) #5 modules detected using these parameters
+
+mod_gsea(cem)
+
+#look at results.. returns the genes belonging to the modules
+module_genes(cem)
+
+#write out the results to file
+write.csv2(module_genes(cem), '/Users/martingordon/Documents/MSC_project/data/CEMiTool/gene_modules')
+
+#geenrate a diagnostic report for this 
+diagnostic_report(cem, title = 'Diagnostics_CEMitool', directory= "/Users/martingordon/Documents/MSC_project/data/CEMiTool/Diagnostics", force = T)
+
+#find modules.. 5 detected
+#cem2 <- find_modules(cem, cor_function = 'bicor', min_ngen = 30, network_type  = 'signed', diss_thresh = 0.75)
+
+generate_report(cem, title = 'CEMitool_report', directory = "/Users/martingordon/Documents/MSC_project/data/CEMiTool/Report", force = T)
+
+# write analysis results into files
+write_files(cem, directory= "/Users/martingordon/Documents/MSC_project/data/CEMiTool/Tables")
+
+# save all plots
+save_plots(cem, "all", directory= "/Users/martingordon/Documents/MSC_project/data/CEMiTool/Plots")
+
+
+#plot of nhow the enrichment of the modules changes across classes
+#cans ee that M!, M2 and M4 are significantly enriched in BP, but we can see all 3 are negatively enriced in the control relative to the miR-overexpressed
+
+cem1 <- mod_gsea(cem)
+cem1 <- plot_gsea(cem1)
+show_plot(cem1, "gsea")
+
+#the expression plot shows the expression patterns of each of the genes in the module
+
+plot_ora(cem)
+
+show_plot(cem, 'ora')
+```
+
+```{r}
+#Diagnostic report output - 
+#sample cluster tree; closely related groups in sampels? highly heterogneous groups could be batch ffects, but all look quite similiar here
+
+#mean x variance scatterplot
+#use vst if strong relationship, this remved the relationship in this dataset
+
+#qq plot and expression histogram
+#highlight distribution values of the expression data. if data not normally distributed, use spearman?
+
+#Looking at the output of the analysis seems interesting, of the 5 modules
+#modules M4 and M3 are significantly enriched in the miR-overexpressing cells, will look for modules overenriched in the miR-binding 
+
+```
+

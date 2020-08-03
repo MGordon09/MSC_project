@@ -1,0 +1,612 @@
+---
+title: "Module Enrichment Analysis"
+author: "Martin Gordon"
+date: "8/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Packages
+```{r}
+library(org.Hs.eg.db)
+library(DOSE) #Disease ontology; description of gene products with disease perspectvies
+library(pathview)
+library(clusterProfiler)
+library(AnnotationHub)
+library(ensembldb)
+library(tidyverse)
+library(fgsea)
+library(stringr) #used to wrap text on dotplot
+library(ggplot2)
+```
+
+## Module Enrichment Analysis
+
+
+#The modules correlated with miR overexp are; pink, light green
+#The modules anticorrelated with miR overexp are; turquoise, lightcyan
+
+
+## Cluster enrichment Analysis: looking at the four clusters, what biological processes are they enriched in? 
+## GO, KEGG, miRNA enrichment
+
+
+
+#recover module genes, look for enrichment compared to the background gene set for the experiment
+#to find possible mechanisms involved in miR-overexpressed, looked for processes enriched/underenriched in the modules significantly correlated with the trait
+
+```{r}
+
+#background set  = colnames(datExpr)
+gene_names
+
+#pink module 
+mod.lightgreen <- names(datExpr)[moduleColors=="lightgreen"] #over 153 members of this gene set..
+mod.lightcyan <- names(datExpr)[moduleColors=="lightcyan"] #75 genes 
+mod.pink <- names(datExpr)[moduleColors=="pink"] #772 genes in module
+mod.turquoise <- names(datExpr)[moduleColors=="turquoise"] #3417 genes in module
+
+```
+
+#Turquoise module Enrichment 
+
+#overall impression; genes in the module seem to be significantly enriched in fundamental processes like chromosomal rearrangement, replication, transcription, translation etc. If these processes are downregulated in miRNA overexpressing cells, may suggest why the cells are growing slower
+
+```{r}
+#try turquoise first as negatively enriched in miR overexp
+#see what is negatively enriched in this
+
+ego <- enrichGO(gene = mod.turquoise, 
+                universe = gene_names,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_BP_summary <- data.frame(ego)
+View(cluster_BP_summary)
+
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/turquoise_ORA_BP.pdf')
+dotplot(ego, showCategory=10) + ggtitle("Turquoise Module GO (Biological Process)")  +
+  theme_classic()
+
+dev.off()
+
+ego <- enrichGO(gene = mod.turquoise, 
+                universe = gene_names,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "CC", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_CC_summary <- data.frame(ego)
+View(cluster_CC_summary)
+
+
+#can see a llot of terms associated with chromosomal rearrangement
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/turquoise_ORA_CC.pdf')
+dotplot(ego, showCategory=10) + ggtitle("Turquoise Module GO (Cellular Component)")  +
+  theme_classic()
+
+
+
+dev.off()
+
+
+ego <- enrichGO(gene = mod.turquoise, 
+                universe = gene_names,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "MF", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_MF_summary <- data.frame(ego)
+View(cluster_MF_summary)
+
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/turquoise_ORA_MP.pdf')
+dotplot(ego, showCategory=10) + ggtitle("Turquoise Module GO (Molecular Function)")  +
+  theme_classic()
+
+dev.off()
+
+
+#KEGG Pathway Enrichment Analysis
+
+ekegg <- enrichKEGG(gene = mod.turquoise, 
+                organism = "hsa",
+                keyType = 'kegg',
+           #     keyType = "ENTREZID",
+                qvalueCutoff = 0.05, 
+                pAdjustMethod = "BH", 
+                universe = gene_names)
+
+cluster_KEGG_summary <- data.frame(ekegg)
+View(cluster_KEGG_summary)
+
+
+#KeGG pathway looks very noisey
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/turquoise_ORA_KEGG.pdf')
+dotplot(ekegg, showCategory=10) + ggtitle("Turquoise Module GO (Molecular Function)")  +
+  theme_classic()
+
+dev.off()
+
+```
+
+#Pink module
+#The pink module seems to be significantly enriched for genes involved in the immune response 
+#positively correlated with the trait.. seems these genes are upregulated in miR-17-92 overexpress cells relative to the control
+# KEGG pathway seems to be related to viral infections.. experimental artifact?? Investigate
+```{r}
+#try pink first as negatively enriched in miR overexp
+#see what is negatively enriched in this
+
+ego <- enrichGO(gene = mod.pink, 
+                universe = gene_names,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_BP_summary <- data.frame(ego)
+View(cluster_BP_summary)
+
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/pink_ORA_BP.pdf')
+dotplot(ego, showCategory=10, font.size = 8) + scale_y_discrete(labels = function(x) str_wrap(x, width = 20)) +
+  ggtitle("Pink Module GO (Biological Process)")  + 
+  theme_classic() 
+
+dev.off()
+
+ego <- enrichGO(gene = mod.pink, 
+                universe = gene_names,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "CC", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_CC_summary <- data.frame(ego)
+View(cluster_CC_summary)
+
+
+#can see a llot of terms associated with chromosomal rearrangement
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/pink_ORA_CC.pdf')
+dotplot(ego, showCategory=10, font.size = 8) + scale_y_discrete(labels = function(x) str_wrap(x, width = 20)) +
+  ggtitle("Pink Module GO (Cellular Compartment)")  + 
+  theme_classic() 
+
+dev.off()
+
+
+ego <- enrichGO(gene = mod.pink, 
+                universe = gene_names,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "MF", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_MF_summary <- data.frame(ego)
+View(cluster_MF_summary)
+
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/pink_ORA_MF.pdf')
+dotplot(ego, showCategory=10, font.size = 8) + scale_y_discrete(labels = function(x) str_wrap(x, width = 20)) +
+  ggtitle("Pink Module GO (Molecular Function)")  + 
+  theme_classic() 
+
+dev.off()
+
+
+#KEGG Pathway Enrichment Analysis
+
+ekegg <- enrichKEGG(gene = mod.pink, 
+                organism = "hsa",
+                keyType = 'kegg',
+           #     keyType = "ENTREZID",
+                qvalueCutoff = 0.05, 
+                pAdjustMethod = "BH", 
+                universe = gene_names)
+
+cluster_KEGG_summary <- data.frame(ekegg)
+View(cluster_KEGG_summary)
+
+
+#KeGG pathway looks very noisey
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/pink_ORA_KEGG.pdf')
+dotplot(ekegg, showCategory=10) + ggtitle("Pink Module GO (Molecular Function)")  +
+  theme_classic()
+
+dev.off()
+
+```
+
+#lightcyan module
+#this module is negatively correlated with the trait, maybe genes in this module are enriched for miRNA target sites?
+#module not really significantly enriched for any BP, not obvious GO terms related to cancer pathogenesis...
+# No CC enriched.. need to consider that issues with noise in the module genes may make it difficult to assess this
+#Again, nothing enriched for molecular function... doesnt seem like an authentic module
+#light cyan module not enriched for KEGG, MF or CC.. doesnt seem like a genune functional module
+
+```{r}
+
+#try turquoise first as negatively enriched in miR overexp
+#see what is negatively enriched in this
+
+ego <- enrichGO(gene = mod.lightcyan, 
+                universe = gene_names,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_BP_summary <- data.frame(ego)
+View(cluster_BP_summary)
+
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/lightcyan_ORA_BP.pdf')
+dotplot(ego, showCategory=10, font.size = 8) + scale_y_discrete(labels = function(x) str_wrap(x, width = 20)) +
+  ggtitle("Lightcyan Module GO (Biological Process)")  + 
+  theme_classic() 
+
+dev.off()
+
+#No cellular compartments enriched in this module... how 
+
+ego <- enrichGO(gene = mod.lightcyan, 
+                universe = gene_names,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "CC", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_CC_summary <- data.frame(ego)
+View(cluster_CC_summary)
+
+
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/lightcyan_ORA_CC.pdf')
+dotplot(ego, showCategory=10, font.size = 8) + scale_y_discrete(labels = function(x) str_wrap(x, width = 20)) +
+  ggtitle("Lightcyan Module GO (Cellular Component)")  + 
+  theme_classic() 
+
+dev.off()
+
+ego <- enrichGO(gene = mod.lightcyan, 
+                universe = gene_names,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "MF", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_MF_summary <- data.frame(ego)
+View(cluster_MF_summary)
+
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/lightcyan_ORA_MF.pdf')
+dotplot(ego, showCategory=10, font.size = 8) + scale_y_discrete(labels = function(x) str_wrap(x, width = 20)) +
+  ggtitle("Lightcyan Module GO (Molecular Function)")  + 
+  theme_classic() 
+
+dev.off()
+
+
+#KEGG Pathway Enrichment Analysis
+
+ekegg <- enrichKEGG(gene = mod.lightcyan, 
+                organism = "hsa",
+                keyType = 'kegg',
+           #     keyType = "ENTREZID",
+                qvalueCutoff = 0.05, 
+                pAdjustMethod = "BH", 
+                universe = gene_names)
+
+cluster_KEGG_summary <- data.frame(ekegg)
+View(cluster_KEGG_summary)
+
+
+#KeGG pathway looks very noisey
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/lightcyan_ORA_KEGG.pdf')
+dotplot(ekegg, showCategory=10, font.size = 8) + scale_y_discrete(labels = function(x) str_wrap(x, width = 20)) +
+  ggtitle("Lightcyan Module GO (Molecular Function)")  + 
+  theme_classic() 
+
+dev.off()
+
+```
+
+
+#lightcyan.. module again seems to be heavily enriched for immune response genes
+#but not significantly enriched for any cellular processes
+#or molecular function...doesnt seem like a v good module
+# Nothing in KEGG pathway that seems v significant
+```{r}
+
+#try turquoise first as negatively enriched in miR overexp
+#see what is negatively enriched in this
+
+ego <- enrichGO(gene = mod.lightgreen, 
+                universe = gene_names,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_BP_summary <- data.frame(ego)
+View(cluster_BP_summary)
+
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/lightgreen_ORA_BP.pdf')
+dotplot(ego, showCategory=10, font.size = 8) + scale_y_discrete(labels = function(x) str_wrap(x, width = 20)) +
+  ggtitle("Lightgreen Module GO (Biological Process)")  + 
+  theme_classic() 
+
+dev.off()
+
+#No cellular compartments enriched in this module... how 
+
+ego <- enrichGO(gene = mod.lightgreen, 
+                universe = gene_names,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "CC", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_CC_summary <- data.frame(ego)
+View(cluster_CC_summary)
+
+
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/lightgreen_ORA_CC.pdf')
+dotplot(ego, showCategory=10, font.size = 8) + scale_y_discrete(labels = function(x) str_wrap(x, width = 20)) +
+  ggtitle("Lightgreen Module GO (Cellular Component)")  + 
+  theme_classic() 
+
+dev.off()
+
+ego <- enrichGO(gene = mod.lightgreen, 
+                universe = gene_names,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "MF", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_MF_summary <- data.frame(ego)
+View(cluster_MF_summary)
+
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/lightgreen_ORA_MF.pdf')
+dotplot(ego, showCategory=10, font.size = 8) + scale_y_discrete(labels = function(x) str_wrap(x, width = 20)) +
+  ggtitle("Lightgreen Module GO (Molecular Function)")  + 
+  theme_classic() 
+
+dev.off()
+
+
+#KEGG Pathway Enrichment Analysis
+
+ekegg <- enrichKEGG(gene = mod.lightgreen, 
+                organism = "hsa",
+                keyType = 'kegg',
+           #     keyType = "ENTREZID",
+                qvalueCutoff = 0.05, 
+                pAdjustMethod = "BH", 
+                universe = gene_names)
+
+cluster_KEGG_summary <- data.frame(ekegg)
+View(cluster_KEGG_summary)
+
+
+#KeGG pathway looks very noisey
+pdf(file='/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/lightgreen_ORA_KEGG.pdf')
+dotplot(ekegg, showCategory=10, font.size = 8) + scale_y_discrete(labels = function(x) str_wrap(x, width = 20)) +
+  ggtitle("Lightgreen Module GO (Molecular Function)")  + 
+  theme_classic() 
+
+dev.off()
+
+```
+
+Overlap of modules and DGE's
+#Can see from plot that many of the differentially expressed genes are located in the pink and turquoise modules, as pink module has ~ 750 genes and locates ~250 of the DGE's seems like an interesting module to investigate.. Over 1/3 of these modules genes are located in the DGE list
+
+```{r}
+#list of gene names 
+de_gene
+
+deg_genelist <- de_gene$entrezgene_id
+deg_genelist <- as.character((deg_genelist))
+deg_genelist # now in same format as the module genes. look at intersection
+
+
+#Use the Venn Diagram package in R
+
+library(VennDiagram)
+
+colours <- c('#CE2F17', '#E0FFFF', '#88D969', '#FFC0CB', '#40E0D0')
+
+venn.diagram(x = list(deg_genelist, mod.lightcyan, mod.lightgreen, mod.pink, mod.turquoise),
+             category.names = c('DEG\'s', 'Lightcyan Module', 'Lightgreen Module', 'Pink Module', 'Turquoise Module'),
+             filename = '/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/DGE_Module_Overlap.png',
+             output = T,
+             imagetype = 'png',
+             scaled = F,
+             col = 'grey70',
+             alpha = rep(0.5, 5),
+             fill = colours,
+             cat.cex = 1,
+             margin = 0.15 )
+             
+
+#display image
+
+options(repr.plot.height=12, repr.plot.width = 12)
+library('png')
+pp <- readPNG("/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/DGE_Module_Overlap.png")
+plot.new()
+rasterImage(pp, 0,0,1.1, 1.1)
+
+```
+
+Also look at enrichment for up and downregualted genes, assess if enrichment is significant
+#focus on turquoise and pink module for down and up regulated genes
+
+```{r}
+#upregulated and downregulated genes from DEG analysis with DESeq2
+#using rownames 
+
+rownames(up_df) <- upreg_genes
+upreg_genes
+
+rownames(down_df) <- downreg_genes
+downreg_genes
+
+#check if significant overlap between these two with the pink and turquoise modules
+#use phypher function to test if overlap is significant 
+
+#upreg
+
+#277 upregulated genes in the pink module
+length(intersect(upreg_genes, mod.pink))
+
+# 0 upregulated genes in the turquoise modules
+length(intersect(upreg_genes, mod.turquoise))
+
+#downreg
+
+#0 downregulated genes in the pink module
+length(intersect(downreg_genes, mod.pink))
+
+# 192 downregualted genes in the turquoise module
+length(intersect(downreg_genes, mod.turquoise))
+
+
+#test for the statistical significance of these overlaps using hypergeometric test
+
+Overlap <- length(intersect(upreg_genes, mod.pink))
+Group1 <- length(upreg_genes)
+Group2 <- length(mod.pink)
+Background <- length(genename) #all genes used in the wgcna analysis (~8k genes)
+
+#should the background be 16k as these were the genes where the DEG's were detected? run both
+
+pval.modpink <- phyper(Overlap,Group2, Background - Group2, Group1, lower.tail = F )  #if less than 0.05 assume significant enrichment
+pval.modpink
+
+#3.040207e-236
+#V significant enrichment for this this group.. This module is significantly enriched for upregulated DEG's
+
+
+Overlap <- length(intersect(downreg_genes, mod.turquoise))
+Group1 <- length(downreg_genes)
+Group2 <- length(mod.turquoise)
+Background <- length(genename)
+
+pval.modturquoise <- phyper(Overlap,Group2, Background - Group2, Group1, lower.tail = F ) #if less than 0.05 assume significant enrichment
+
+pval.modturquoise
+# enrichment 1.551625e-65  ... v significantly enriched for DEG's
+```
+
+Upreg genes and pink module
+
+```{r}
+
+library(VennDiagram)
+
+#FF is pink, #40E is turquoise
+#colours <- c('#CE2F17', '#E0FFFF', '#88D969', '#FFC0CB', '#40E0D0')
+
+colours <- c('#FFC0CB', '#CE2F17')
+
+venn.diagram(x = list(upreg_genes, mod.pink),
+             category.names = c('Pink Module', 'Upregulated DEG\'s'),
+             filename = '/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/UpregPink_Module_Overlap.png',
+             output = T,
+             main = '',
+             sub = 'Overlap of DEG\'s and Pink Module',
+             imagetype = 'png',
+             scaled = F,
+             col = 'grey70',
+             alpha = rep(0.5, 2),
+             fill = colours,
+             cat.cex = 1,
+             fontfamily = "sans",
+            sub.pos = c(.5,.80),
+            cat.default.pos = "outer",
+            hyper.test = T,
+            total.population = Background,
+            lower.tail = F,
+            cat.pos = c(3, 0),
+             margin = 0.15 )
+
+options(repr.plot.height=12, repr.plot.width = 12)
+library('png')
+pp <- readPNG('/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/UpregPink_Module_Overlap.png')
+plot.new()
+rasterImage(pp, 0,0,1.1, 1.1)
+
+```
+
+Downreg genes and module turquoise 
+
+```{r}
+colours <- c('#1167b1','#40E0D0')
+
+venn.diagram(x = list(downreg_genes, mod.turquoise),
+             category.names = c('Downregulated DEG\'s', 'Turquoise Module'),
+             filename = '/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/DownregTurquoise_Module_Overlap.png',
+             output = T,
+             main = '',
+             sub = 'Overlap of DEG\'s and Blue Module',
+             imagetype = 'png',
+             scaled = F,
+             col = 'grey70',
+             alpha = rep(0.5, 2),
+             fill = colours,
+             cat.cex = 1,
+             fontfamily = "sans",
+            sub.pos = c(.5,.80),
+            cat.default.pos = "outer",
+            hyper.test = T,
+            total.population = Background,
+            lower.tail = F,
+            cat.pos = c(3, 0),
+             margin = 0.15 )
+
+options(repr.plot.height=12, repr.plot.width = 12)
+library('png')
+pp <- readPNG('/Users/martingordon/Documents/MSC_project/data/new_WGCNA/Enrichment_Analysis/UpregPink_Module_Overlap.png')
+plot.new()
+rasterImage(pp, 0,0,1.1, 1.1)
+
+```
+
+Upreg and downreg genes significantly enriched in modules pink and turquoise
+V large modules (esp Turquoise), filter by overlapping genes for genes in modules with large effect sizes for cytoscape input
+
+```{r}
+#use these to filter the modules
+filter_turquoise <- intersect(downreg_genes, mod.turquoise)
+filter_pink <- intersect(upreg_genes, mod.pink)
+```
+

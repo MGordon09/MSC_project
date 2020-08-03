@@ -1,0 +1,195 @@
+---
+title: "Module Robustness Assessment"
+author: "Martin Gordon"
+date: "8/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Module Robustness Analysis
+bootstrap clustering - observe stability of the clustering 
+
+```{r}
+# Number of resampling runs
+# same parameters as WGCNA analysis
+nRuns = 50
+power = 14 #used this pwer for the network construction
+deepSplit = 2
+minModuleSize = 30
+networkType = "signed"
+TOMType = "signed"
+TOMDenom = "mean"
+reassignThreshold = 0
+mergeCutHeight = 0.25
+# Proportion of missing data. Not needed for the calculations, but useful to know.
+propNA = sum(is.na(datExpr))/length(datExpr)
+propNA
+
+```
+
+```{r}
+#bootstrap sampling and construction of the tree 50x times (may need to increase)
+tmf0 = system.time ( {
+mods_nopam = sampledBlockwiseModules(
+nRuns = nRuns,
+replace = TRUE,
+datExpr = datExpr,
+randomSeed  = 786,
+maxBlockSize = 20000,
+networkType = networkType,
+TOMType = TOMType,
+TOMDenom = TOMDenom,
+deepSplit = deepSplit,
+pamStage = F,
+mergeCutHeight = mergeCutHeight,
+reassignThreshold = reassignThreshold,
+#skipUnsampledCalculation = FALSE,
+corType = 'bicor',
+numericLabels = TRUE,
+checkMissingData = FALSE,
+quickCor = 0, verbose = 5 ) } )
+# Print the timing results
+print(tmf0)
+# Save the resampled modules
+save(tmf0, mods_nopam, file = "sampledModuleExample-mods_nopam.RData")
+
+```
+
+```{r}
+
+slowAnalysis = function(datExpr)
+{
+#cor = stats::cor(datExprDEG, use = "p")
+#cor[cor<0] = 0
+
+
+adj = adjacency(datExpr,type = "signed", power = 14, corFnc = 'bicor')
+
+dTOM = TOMdist(adj, TOMType = TOMType, TOMDenom = TOMDenom)
+collectGarbage()
+tree = stats::hclust(as.dist(dTOM), method = "a")
+labels = cutreeDynamic(tree, minClusterSize = minModuleSize, distM = dTOM, deepSplit = deepSplit)
+mergedLabels = mergeCloseModules(datExpr, labels, cutHeight = mergeCutHeight)
+mergedLabels
+}
+tms = system.time({slowLabels = slowAnalysis(datExpr)})
+  print(tms)
+  
+```
+
+#Visualise results
+
+```{r}
+# if necessary, re-load the results of the resampling analysis
+load(file = "sampledModuleExample-mods_nopam.RData")
+nGenes = ncol(datExpr)
+
+nGenes
+
+# Define a matrix of labels for the original and all resampling runs
+#make empty matrix
+labels = matrix(0, nGenes, nRuns + 1)
+
+dim(labels)
+labels[, 1] = mods_nopam[[1]]$mods$colors #assign colour labels to one of the matrices
+
+#labels[, 1] = dynamicColors
+labels
+
+
+# Relabel modules in each of the resampling runs so that full and reampled modules with best overlaps have
+# the same labels. This is achieved by the function matchLabels.
+pind = initProgInd()
+for (r in 1:(nRuns))
+{
+labels[, r] = matchLabels(mods_nopam[[r]]$mods$colors, dynamicColors)
+#pind = updateProgInd((r-1)/nRuns, pind)
+}
+# Save the results
+save(labels, file = "sampledModuleExample-matchedLabels_nopam.RData")
+
+```
+
+#This plot gives an indication of the module stability. Can see hierarchical clustering of all genes and braches correspond to the modules. Coloured assignments identicate modules found in the resampling process. This allows us to see which modules are robust by seeing their replication in resampling
+```{r}
+
+pdf(file = "/Users/martingordon/Documents/MSC_project/data/WGCNA/module_assignment_bootstrap_no_pam.pdf", wi=20, h=15)
+
+#load(file = "sampledModuleExample-matchedLabels.RData")
+
+mods_nopam[[1]]$mods$dendrograms[[1]]
+
+plotDendroAndColors(mods_nopam[[1]]$mods$dendrograms[[1]],
+labels2colors(labels),
+c("Full data set", paste("Resampling", c(1:nRuns))),
+main = "Gene dendrogram and module labels from resampled data sets",
+autoColorHeight = FALSE, colorHeight = 0.65,
+dendroLabels = FALSE, hang = 0.03, guideHang = 0.05,
+addGuide = TRUE,
+guideAll = FALSE,
+cex.main = 2, cex.lab = 1.6, cex.colorLabels = 0.8, marAll = c(0, 5, 3, 0))
+
+#View(mods_wholeset[[1]]$mods$dendrograms[[1]])
+
+dev.off()
+
+#plotDendroAndColors(mods_wholeset[[1]]$mods$dendrograms[[1]], labels2colors(labels))
+```
+
+Work in progress: assess module preservation via intramodular connectivty
+WGCNA module preservation; take the bootstrapped samples, give the module labels and compute intramodular connectivity, repeat x times and correlation with orignial intramodular connectivty value for the module
+
+```{r}
+#loop to extract genes belonging to modules, compute mean intramodular connectivty and  subsample x times and compute mean intramodular connectivity for comparison
+
+#initialised two lists to store the mean connectivty of the resamplings od each module
+fullsamp_list <- list()
+subsamp_list <- list()
+
+
+names(geneModuleMembership)
+
+names(geneModuleMembership) <- c("black","lightgreen", "turquoise", "darkred",  "white", "darkorange" ,  "lightyellow",
+"pink", "yellow", "green","lightcyan","grey")
+
+
+
+for (i in names(geneModuleMembership)) {
+  # Pull out the module we're working on
+  module <- i
+  print(module)
+  
+  # Find the index in the column of the dataframe 
+  column <- match(module, modNames)
+  print(column)
+
+  moduleGenes = moduleColors == module #matches genes to modules they belong to  
+
+  genename  = rownames(connect.measures) 
+  print(paste("There are ", length(genename[moduleGenes]), " genes in the ", module, " module.", sep = ""))
+  
+  #full set. sample once, calculate mean of intramodular connectivty and replicate 1000x times (match resampling)
+  #list of lists, each module a list with 1000x mean values from the sampling 
+  ori_sample <- connect.measures[genename[moduleGenes], 2]
+  main_samp <- rep(mean(ori_sample), 1000)
+  fullsamp_list <- append(fullsamp_list, list(main_samp))
+
+  #subsampling 50% of module genes with replacement; repeat 1000 times for each module
+  resamples <- lapply(1:1000, function(i) connect.measures[ sample(genename[moduleGenes],   round(0.50*length(genename[moduleGenes])), replace = T), 2 ])
+ 
+  
+  # calculate mean value of each of the resamplings using sapply
+  mean.resamp <- sapply(resamples, mean)
+  #print(paste('these are the mean of the resamplings', mean.resamp, sep = ''))
+  
+  #append values to list
+  subsamp_list <- append(subsamp_list, list(mean.resamp))
+  #print(paste('these are the mean lists', subsamp_list, sep = ''))
+  
+}
+
+moduleGenes
+```

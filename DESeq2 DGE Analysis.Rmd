@@ -1,0 +1,492 @@
+---
+title: "Project DGE Analysis"
+author: "Martin Gordon"
+date: "8/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## DESeq2 Differential Gene Expression Analysis 
+
+Packages 
+
+```{R, messages=F}
+library(tximport)
+library(biomaRt)
+library(rio)
+library(lubridate)
+library(ggplot2)
+library(RColorBrewer)
+library(pheatmap)
+library(DESeq2)
+library(ggrepel)
+library(gplots)
+library(pvclust)
+library(factoextra)
+library(EnhancedVolcano)
+library(apeglm)
+library(sva) 
+library(tidyverse)
+library(IHW)
+
+```
+
+```{r}
+#minimal filtering of low counts to reduce size 
+#remove genes with sums of less than 10  as no staticial power to detect diifferences o
+
+keep <- rowSums(counts(dds)) >= 10
+table(keep) #16320 genes passed threshold threshold
+dds <- dds[keep,]
+
+#run deseq2
+dds <- DESeq(dds)
+```
+
+```{r}
+#recover normalised & log2 counts
+normalised_counts <- counts(dds, normalized = TRUE)
+write.table(normalised_counts, file="~/Desktop/normalised_counts.txt", append = TRUE, sep="\t", row.names = TRUE, col.names = TRUE, quote = FALSE)
+
+log_counts <- log2(normalised_counts + 1)
+
+#write out counts to file with col for gene id
+cts_out <- as.data.frame(normalised_counts)
+cts_out <- tibble::rownames_to_column(cts_out, "entrez_gene_id")
+write.table(cts_out, file = '/Users/martingordon/Documents/MSC_project/data/DESeq_output/Normalised_Counts.txt', sep ='\t', col.names = T, row.names = F)
+```
+
+
+```{r}
+#Eexploratory analysis
+
+#normalised vs unnomralised counts
+par(mfrow=c(1,3))
+boxplot(counts(dds,normalized=T)) #mutant smaple 1 seems to have nore counts than other
+boxplot(log10(counts(dds,normalized=TRUE)+1))
+
+boxplot(assay(vsd))
+
+
+head(assay(vsd))
+
+#data transformations
+#these two tranformations work better with heteroskadastic data than the standard log transform
+#DESeq2 uses a regularized log transform (rlog) of the normalized counts for sample-level QC as it moderates the variance across the mean, improving the clustering.
+#vst vs rlog; rlog more time consuming but better for small datasets, vst less sensitive to high count outliers
+
+vsd <- vst(dds, blind = FALSE) 
+rld <- rlog(dds, blind=TRUE)
+
+
+#PCA plot
+
+pcaData <- plotPCA(rld, intgroup="Condition", returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ #pdf(file='/Users/martingordon/Documents/MSC_project/data/DESeq_output/DESeq2_plots/PCA_1condition.pdf')
+  ggplot(pcaData, aes(PC1, PC2, color=Condition)) +
+  geom_point(size=3) +
+  geom_text_repel(aes(label= colnames(rld)), size = 3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey70") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey70") +
+  scale_colour_manual(values=c("#999999", "#E69F00")) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed() +
+    
+  labs(title = "PCA Plot",
+              subtitle = "PC1 vs PC2") +
+  
+  theme_classic() + theme (
+    panel.grid.minor =   element_blank(),
+    panel.grid.major =   element_blank(),
+    legend.position = c(0.85,0.82)) 
+
+  #dev.off()
+  
+```
+
+```{r}
+#PCAtools package; pca with DESeq2 maskes some of the low variance genes; this uses baseR to plot them all
+p <- pca(assay(rld), metadata = sample_table)
+
+p <- rlog(counts(dds), blind = T)
+p <- pca(p, metadata = sample_table, removeVar = 0.1)
+
+pdf(file="~/Documents/MSC_project/data/DESeq_output/DESeq2_plots/screeplot.pdf")
+screeplot(p, gridlines.major = F,gridlines.minor = F, borderColour = 'grey74',
+          colCumulativeSumLine = '#D55E00', sizeCumulativeSumLine = 1, colCumulativeSumPoints = '#D55E00',
+          sizeCumulativeSumPoints = 1, colBar = "#0072B2" )
+
+dev.off()
+
+pdf(file="~/Documents/MSC_project/data/DESeq_output/DESeq2_plots/biplot.pdf")
+biplot(p, 
+       colby = 'Condition', colkey = c('Control' = "#0072B2" , 'miR.17.92_Overexpressed' = '#D55E00' ),
+       hline = 0, vline= 0, hlineType = 'dashed', vlineType = 'dashed', hlineCol = 'grey74', vlineCol ='grey74',
+       gridlines.major = F,gridlines.minor = F, borderColour = 'grey74' )
+dev.off()
+```
+
+
+```{r}
+#Dispersion estimates
+#DESeq2 dispersion estimates are inversely related to the mean and directly related to variance. Based on this relationship, the dispersion is higher for small mean counts and lower for large mean counts. The dispersion estimates for genes with the same mean will differ only based on their variance
+
+#First, gene-wise MLEs are obtained using only the respective gene’s data (black dots). Then, a curve (red) is fit to the MLEs to capture the overall trend of dispersion-mean dependence. This fit is used as a prior mean for a second estimation round, which results in the final MAP estimates of dispersion (arrow heads). 
+
+#This can be understood as a shrinkage (along the blue arrows) of the noisy gene-wise estimates toward the consensus represented by the red line. The black points circled in blue are detected as dispersion outliers and not shrunk toward the prior
+
+#pdf(file='/Users/martingordon/Documents/MSC_project/data/DESeq_output/DESeq2_plots/Dispersion.pdf')
+plotDispEsts(dds)
+#dev.off()
+
+```
+
+```{r}
+# Sample clustering - log2 tranformed & rlog
+
+num_conditions <- nlevels(sample_table$Condition)
+
+col_dendo <- c("#0072B2","#0072B2","#0072B2", "#0072B2",'#D55E00','#D55E00','#D55E00', '#D55E00')
+
+pal <- colorRampPalette(brewer.pal(num_conditions, "Set1"))(num_conditions)
+cond_colors <- pal[as.integer(sample_table$Condition)]
+#pdf(file='~/Documents/MSC_project/data/DESeq_output/DESeq2_plots/sample_clust(log2).pdf')
+heatmap.2(cor(log_counts), ColSideColors=col_dendo, labRow='', key.title = NA, margins = c(13,11),
+          trace='none', Rowv = T, dendrogram='column', main=' Sample correlations(log2-transformed)')
+
+#dev.off()
+
+
+#sample clustering rlog distance 
+sampleDists <- dist(t(assay(rld)))
+sampleDists
+
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- colnames(rld)
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+#pdf(file='~/Documents/MSC_project/data/DESeq_output/DESeq2_plots/sample_clust(distance).pdf')
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+
+#dev.off()
+```
+
+```{r}
+#pvclust: p-values for hierarchical clustering via multiscale bootstrap resampling. Hierarchical clustering is done for given data and p-values are computed for each of the clusters
+
+result <- pvclust(log_counts, method.dist = "cor", method.hclust = "average", nboot = 500)
+#pdf(file="~/Documents/MSC_project/data/DESeq_output/DESeq2_plots/sample_hclust.pdf")
+plot(result)
+pvrect(result)
+#dev.off()
+
+#cookes distance:
+# diagnostic plot: calculates, for every gene and for every sample, a diagnostic test for outliers called Cook’s distance. 
+#Cook’s distance is a measure of how much a single sample is influencing the fitted coefficients for a gene, and a large value of Cook’s distance is intended to indicate an outlier count
+#boxplot of the Cook’s distances
+
+#pdf(file="~/Documents/MSC_project/data/DESeq_output/DESeq2_plots/cooks_distance.pdf")
+par(mar=c(8,5,2,2))
+boxplot(log10(assays(dds)[["cooks"]]), range=0, las=2, main = 'Sample Boxplots (Cookes Distance)', col = 'grey76')
+#dev.off()
+```
+
+DESeq2 Results
+
+```{r}
+#DESeq2 results table
+
+
+#Independent Hypothesis Weighting
+#A generalization of the idea of p value filtering is to weight hypotheses to optimize power; detect more DEG's
+#IHW input a vector of p-values (of length m), a matching vector of covariates (null pval dont depend on them), the significance level αat which the FDR should be controlled.
+#The weights allow different prioritization of the individual hypotheses, based on their covariate.
+#pval and base mean approximately independent under null 
+
+#used for volcano plot
+res_05 <- results(dds, filterFun=ihw, alpha = 0.05) #p adj 0.05
+summary(res_05) 
+
+
+#lfcshrinkage
+#shrink apeglm method good for shrinking for shrinking the noisy LFC estimates while giving low bias LFC estimates for true large differences 
+#provide dds, the number of coefficient to moderate ('control vs overexp')
+#LFC <- lfcShrink(dds, coef= "Condition_miR.17.92_Overexpressed_vs_Control", type = "apeglm") 
+#To generate more accurate log2 foldchange estimates, DESeq2 allows for the shrinkage of the LFC estimates toward zero when the information for a gene is low, which could include: low counts/  high dispersion values
+#The shrinkage of fold change is to help with downstream assessmenteg for GSEA analysis provide shrunken values
+
+LFC <- lfcShrink(dds = dds, res= res_05, coef = "Condition_miR.17.92_Overexpressed_vs_Control", type = "apeglm")
+
+summary(LFC)
+
+```
+
+```{r}
+#pvalue histogram
+
+
+#pdf(file="~/Documents/MSC_project/data/DESeq_output/DESeq2_plots/pval_hist.pdf")
+hist(res_05$pvalue, breaks=50, col="grey70", xlab="P-Value (Fold change) miR-17-92 Overexpressed vs Ctrl", main="Distribution of P-Values") 
+abline(v=c(0.05),col="black",lwd=2,lty=2)
+legend("topright", "P-Value <0.05",lwd=2,lty=2)
+#dev.off()
+
+
+#log2 FC distrbution; 
+
+#pdf(file="~/Documents/MSC_project/data/DESeq_output/DESeq2_plots/log2FC_hist.pdf")
+hist(res_05$log2FoldChange, breaks=50, col="grey70", xlab="(Fold change) miR-17-92+ vs Normal", main="Distribution of differential expression values")
+abline(v=c(-2,2), col="black", lwd=2, lty=2)
+legend("topright", "Fold change <-2 and >2", lwd=2, lty=2)
+#dev.off()
+
+
+plot(res_05$baseMean+1, -log10(res$pvalue),
+     log="x", xlab="mean of normalized counts",
+     ylab=expression(-log[10](pvalue)),
+     ylim=c(0,30),
+     cex=.4, col=rgb(0,0,0,.3))
+
+```
+
+```{r}
+#volcano plot: similiar results to MA plot but also accounts for significance
+#enhanced volcano package
+
+#When the read counts are low or highly variable, the maximum likelihood estimates for the Log Fold Change has high variance, leading to large estimates not representative of true differences
+
+LFC_df <- as.data.frame(LFC)
+LFC_df
+
+ # pdf(file="~/Documents/MSC_project/data/DESeq_output/DESeq2_plots/volcano_plot.pdf")
+  EnhancedVolcano(LFC_df,
+    lab = rownames(LFC_df),
+    x = 'log2FoldChange',
+    y = 'padj',
+    selectLab = c(""),
+    caption = paste0('Total Genes: ', nrow(LFC_df)),
+   # legendPosition = "right",
+    title = "Differentially Expressed Genes",
+    subtitle = "MCF7 miR-17-92 vs MCF7 Controls",
+    FCcutoff = 1,
+    pCutoff = 0.05,
+    legendLabels = c("Not Sig", "+/- 1 Log2 FC", "adj.pval <0.05", "adj.pval <0.05 & & +/- 1 Log2 FC"),
+    legendVisible = T,
+    legendLabSize = 8,
+    legendPosition = c(.80, .96),
+    legendIconSize = 3,
+    xlim = c(-5, 5),
+    transcriptPointSize = 1.5,
+    gridlines.major = FALSE,
+    gridlines.minor = FALSE)
+
+ #   dev.off()
+    
+```
+
+Write out DESeq2 results to file
+
+```{r}
+
+#extract rownammes with p.val and log2FC thresholds for subseting results
+up_key <-  intersect(rownames(LFC)[which(LFC$log2FoldChange>=1)],
+                       rownames(LFC)[which(LFC$padj<=0.05)])
+
+#recover the upregulated genes from res object
+#358 genes.. reduce log2FC threshold?
+up_df <- as.data.frame( (LFC)[which(rownames(LFC) %in% up_key),])
+
+#make rownames col entrezgene ids for merging with biomart df
+up_df <- tibble::rownames_to_column(up_df, "entrezgene_id")
+
+#biomart attributes inc miRNA targeting
+info <- getBM(attributes = c("entrezgene_id",
+                             "external_gene_name",
+                             "chromosome_name",
+                             "start_position",
+                             "end_position",
+                             "strand",
+                             "entrezgene_description"),
+                             filters = c("entrezgene_id"), #filter output to entrez_gene_id 
+                             values = up_df$entrezgene_id, #values for filter from df column
+                             mart = mart)
+
+#merge dfs & tidy
+tmp <- merge(info, up_df, by="entrezgene_id")
+
+#filter out some of the columns 
+tmp <- tmp %>% dplyr::select(external_gene_name, chromosome_name, start_position, end_position, strand, entrezgene_description, log2FoldChange, pvalue, padj)
+tmp <- tmp[order(-tmp$log2FoldChange),]
+tmp$strand <- gsub("-1", "-", tmp$strand)
+tmp$strand <- gsub("1", "+", tmp$strand)
+#remove duplicates
+tmp <- tmp[!duplicated(tmp$external_gene_name),]
+
+colnames(tmp) <- c('Gene', 'Chromosome', 'Start', 'Stop', 'Strand', 'Description', 'Log2FC', 'P-value', 'Adj P-value')
+
+
+write.table(x = tmp, file = '~/Documents/MSC_project/data/DESeq_output/miR-17-92+_vs_ctrl_upreg.txt', sep ='\t', col.names = T, row.names = F)
+              
+```
+
+```{r}
+#Downreg genes 
+
+down_key <-  intersect(rownames(LFC)[which(LFC$log2FoldChange<=-1)],
+                       rownames(LFC)[which(LFC$padj<=0.05)])
+
+#recover the upregulated genes from res object
+#358 genes.. reduce log2FC threshold?
+down_df <- as.data.frame( (LFC)[which(rownames(LFC) %in% down_key),])
+
+#make rownames col entrezgene ids for merging with biomart df
+down_df <- tibble::rownames_to_column(down_df, "entrezgene_id")
+
+#biomart attributes inc miRNA targeting
+info <- getBM(attributes = c("entrezgene_id",
+                             "external_gene_name",
+                             "chromosome_name",
+                             "start_position",
+                             "end_position",
+                             "strand",
+                             "entrezgene_description"),
+                             filters = c("entrezgene_id"), #filter output to entrez_gene_id 
+                             values = down_df$entrezgene_id, #values for filter from df column
+                             mart = mart)
+
+tmp <- merge(info, down_df, by="entrezgene_id")
+
+#filter out some of the columns 
+tmp <- tmp %>% dplyr::select(external_gene_name, chromosome_name, start_position, end_position, strand, entrezgene_description, log2FoldChange, pvalue, padj)
+tmp <- tmp[order(tmp$log2FoldChange),]
+tmp$strand <- gsub("-1", "-", tmp$strand)
+tmp$strand <- gsub("1", "+", tmp$strand)
+
+#remove duplicates
+tmp <- tmp[!duplicated(tmp$external_gene_name),]
+
+colnames(tmp) <- c('Gene', 'Chromosome', 'Start', 'Stop', 'Strand', 'Description', 'Log2FC', 'P-value', 'Adj P-value')
+
+write.table(x = tmp, file = '~/Documents/MSC_project/data/DESeq_output/miR-17-92+_vs_ctrl_downreg.txt', sep ='\t', col.names = T, row.names = F)
+```
+
+```{r}
+#list of significant genes 
+#significant genes - combine upreg and downreg subsets
+#list of genes (entrezgene_id)
+sig_genes <- c(up_key, down_key)
+write.table(sig_genes, '~/Documents/MSC_project/data/DESeq_output/sig_list.txt', 
+              row.names = F, col.names = F, quote=F)
+
+
+length(sig_genes)
+#546 genes  
+
+```
+
+```{r}
+#heatmap of DGE & samples
+
+#read in DEG file
+de_gene <- read.table('~/Documents/MSC_project/data/DESeq_output/sig_list.txt', sep = "\t", header=F)
+
+
+#merge with biomart info file to recover the gene names 
+colnames(de_gene) <- "entrezgene_id"
+
+info <- getBM(attributes = c("entrezgene_id",
+                             "external_gene_name"),
+                             filters = c("entrezgene_id"), #filter output to entrez_gene_id 
+                             values = de_gene$entrezgene_id, #values for filter from df column
+                             mart = mart)
+
+de_gene <- merge(info, de_gene, by="entrezgene_id")
+
+#Use the counts normalised using TMM 
+head(normalised_counts)
+
+#make tibble objects - easier to work with dlpyr
+#make row names col for filtering with sig genes
+normalised_counts <- normalised_counts %>% 
+  data.frame() %>%
+  rownames_to_column(var="entrezgene_id") %>% 
+  as_tibble()
+
+#extract normalised counts for sig genes, set entrezgene_id to rownames
+norm_sig <- normalised_counts %>%
+  filter(entrezgene_id %in% de_gene$entrezgene_id) %>%
+  data.frame() %>%
+  column_to_rownames(var = "entrezgene_id")
+
+#colour palette (may need to change)
+heat_colors <- brewer.pal(11, "YlOrRd")
+anno_colours <- list(Condition = c(Control = "#0072B2",  miR.17.92_Overexpressed='#D55E00'))
+
+#not running unsure why...
+norm_ct <- rownames(norm_sig)
+
+heatmap_counts <- assay(vsd) 
+
+heatmap_col <- heatmap_counts[norm_ct,]
+dim(heatmap_col) 
+
+
+#Heatmap of DEGs 
+#scale = "row" ; z scores plotted rather than normalised values
+#z score computed after the clustering 
+#Z-scores are computed on a gene-by-gene basis by subtracting the mean and then dividing by the standard deviation.
+
+
+#pdf(file="~/Documents/MSC_project/data/DESeq_output/DESeq2_plots/DGE_clust.pdf")
+pheatmap(norm_sig, 
+       #  title = "Differentially Expressed Genes",
+        # subtitle = "MCF7 miR-17-92 vs MCF7 Controls",
+         color = heat_colors, 
+         cluster_rows = T,
+         show_rownames = F,
+         show_colnames = T,
+         annotation = annotation, 
+         annotation_legend = T,
+         annotation_colors = anno_colours,
+         annotation_names_col = F,
+         border_color = NA, 
+         fontsize = 9,
+         fontsize_row = 5,
+         scale = "row", 
+         clustering_distance_rows = 'correlation',
+         clustering_distance_cols = 'correlation',
+         clustering_method = "average",
+         height = 20)
+
+#dev.off()
+             
+```
+
+Plot counts of miR-17-92 cluster expression across samples
+```{r}
+
+#pdf(file="~/Documents/MSC_project/data/DESeq_output/DESeq2_plots/miR-17-92_plotcount.pdf")
+p <- plotCounts(dds, gene= '407975', intgroup = "Condition", normalized = T, returnData = T)
+ggplot(p, aes(x = Condition, y = count, colour = Condition)) +
+  geom_point(position=position_jitter(w = 0.1,h = 0)) +
+  geom_text_repel(aes(label = rownames(p)), size =3) + 
+  scale_color_manual(values = c("#0072B2", '#D55E00')) +
+  theme_bw() +
+  ggtitle("miR-17-92") +
+  theme_classic() +
+  theme(
+  plot.title = element_text(hjust = 0.5),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank())
+
+#dev.off()
+
+```

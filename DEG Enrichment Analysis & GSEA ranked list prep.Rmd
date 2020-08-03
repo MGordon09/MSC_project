@@ -1,0 +1,227 @@
+---
+title: "DGE Enrichment Analysis & GSEA ranked list prep"
+author: "Martin Gordon"
+date: "8/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Enrichment Analysis
+
+What pathways do the genes belong to?
+Cancer pathways?
+miRNA targeting the genes?
+
+Try clusterprofiler tool and prepare input file for GSEA 
+
+```{r}
+library(org.Hs.eg.db)
+library(DOSE) #Disease ontology; description of gene products with disease perspectvies
+library(pathview)
+library(clusterProfiler)
+library(AnnotationHub)
+library(ensembldb)
+library(tidyverse)
+library(fgsea)
+```
+
+EnrichGO Overepresentation Analysis
+
+```{r}
+#enrichGO; use entrez gene ids from sig list and compare to universe 
+# read in sig_id list and extract row names from res (all genes, including those w/o significance; used as universe for hypogeometric testing)
+
+#Overrepresentation analysis; determine whether known biological functions or processes are over-represented (= enriched) in an experimentally-derived gene list, e.g. a list of differentially expressed genes (DEGs). The p-value can be calculated by hypergeometric distribution. using Fishers exact test
+
+
+#Overepreesnentation Analysis (ORA) vs GSEA:
+#ORA only need vector of gene IDs, GSEA needs ranked list
+
+#sig list from DESeq2 analysis ( p.adj <= 0.05 and log2FC > =1 )
+
+sig_genes
+summary(sig_genes)
+
+#'universe' gene set; all genes tested 
+
+all_genes <- rownames(LFC) #pull out entrez ids 
+summary(all_genes) #already character
+
+
+## Run GO enrichment analysis 
+ego <- enrichGO(gene = sig_genes, 
+                universe = all_genes,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", #Biological Processes GO term, also done for CC and MF
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+
+cluster_BP_summary <- data.frame(ego)
+View(cluster_BP_summary)
+
+#take subset of the dataframe and plot
+
+## Dotplot 
+pdf(file="~/Documents/MSC_project/data/DESeq_output/Enrichment_Analysis/GO_enrichment_BP.pdf")
+dotplot(ego, showCategory=30) + ggtitle("Dotplot for ORA")  +
+  theme_classic()
+
+dev.off()
+
+#take subset of ego_p
+ego_p <- as.data.frame(ego) 
+ego_p <- ego_p[1:30,]
+
+
+ggplot(ego_p, aes(x = GeneRatio, y = fct_reorder(Description, GeneRatio))) + 
+               geom_point(aes(size = GeneRatio, color = p.adjust)) +
+               theme_bw(base_size = 14) +
+        scale_colour_gradient(limits=c(0, 0.20), low="red") +
+        ylab(NULL) +
+        ggtitle("GO pathway enrichment")
+
+
+# enrichment GO plot; shows relationship of top x most significantly enriched GO terms (padj) by grouping similiar terms together
+#colours represent p-values relative to others (brighter more significant)
+pdf(file="~/Documents/MSC_project/data/DESeq_output/Enrichment_Analysis/enrichment_GO_p.pdf")
+emapplot(ego, showCategory = 20)
+
+dev.off()
+```
+
+```{r}
+#Cateogry netplot; relationships between the genes associated with the top five most significant GO terms and the fold changes of the significant genes associated with these terms (color)
+#size of GO terms reflects pvalues of the terms- more significant are larger
+#good for hypothesis geenration; idenify genes that may be NB for some of the afffected processes
+
+#read in the two tables of significant genes and cbind write out 
+
+up_reg_list <- read.csv2('/Users/martingordon/Documents/MSC_project/data/DESeq_output/miR-17-92+_vs_ctrl_upreg.txt', sep = '\t', header =  T)
+
+down_reg_list <- read.csv2('/Users/martingordon/Documents/MSC_project/data/DESeq_output/miR-17-92+_vs_ctrl_downreg.txt', sep = '\t', header =  T)
+
+#bind together and write to new file
+sig_gene_list <- rbind(up_reg_list, down_reg_list)
+write.table(x = sig_gene_list, file = '~/Documents/MSC_project/data/DESeq_output/all_DEG.txt', sep ='\t', col.names = T, row.names = F)
+
+
+## To color genes by log2 fold changes, we need to extract the log2 fold changes from our results table creating a named vector
+OE_foldchanges <-  sig_gene_list$log2FoldChange
+
+names(OE_foldchanges) <- sigOE$gene
+
+## Cnetplot details the genes associated with one or more terms - by default gives the top 5 significant terms (by padj)
+cnetplot(ego, 
+         categorySize="pvalue", 
+         showCategory = 5, 
+         foldChange=OE_foldchanges, 
+         vertex.label.font=6)
+
+## If some of the high fold changes are getting drowned out due to a large range, could set a maximum fold change value
+
+pdf(file="~/Documents/MSC_project/data/DESeq_output/Enrichment_Analysis/category_netplot.pdf")
+cnetplot(ego, 
+         categorySize="pvalue", 
+         showCategory = 6, 
+         foldChange=OE_foldchanges, 
+         vertex.label.font=5,
+         layout = 'kk',
+         circular = F )
+
+dev.off()
+```
+
+
+GSEA analysis 
+Determine if a ranked gene list is significantly enriched in a prior defined biological processes/gene sets
+ORA only need vector of gene IDs, GSEA needs ranked list
+Create ranked list in R for use with GSEA app (ranked based on signed p-value)
+
+```{r}
+#Prepare file for GSEA input; input ALL genes for testing (including middle ranked (non-significant as removing can reduce power)
+#rank genes based on signed pval
+
+x <- LFC_df
+x <- add_rownames(x, var = "entrezgene_id") #row to col 
+head(x)
+x$fcsign <- sign(x$log2FoldChange) #returns col of sign (+/- of LFC)
+x$logP=-log10(x$pvalue) #take log of all p val
+x$metric= x$logP/x$fcsign #signed pval ranking
+x <- x[,c('entrezgene_id', 'metric')]
+x <- x[order(-x$metric),] #order in descending order
+
+x <-  na.omit(x) #remove rows with na 
+dim(x)
+x <- x[!duplicated(x$entrezgene_id),] #remove duplicates
+dim(x)
+
+
+#map entrez-id to symbol for use with fgsea
+my.keys <- as.character(rownames(x))
+
+
+ens2symbol <- AnnotationDbi::select(org.Hs.eg.db,
+                                    key=my.keys, 
+                                    columns="SYMBOL",
+                                    keytype="ENTREZID")
+
+ens2symbol <- as_tibble(ens2symbol)
+colnames(ens2symbol) <- c("entrezgene_id", "symbol")
+
+
+#join dfs
+res <- inner_join(x, ens2symbol, by=c("entrezgene_id"="entrezgene_id"))
+
+#drop rows with na
+res <- na.omit(res)
+dim(res) #16278 left of 16320
+
+head(x)
+ #signed pval ranking
+res <- res[,c('symbol', 'metric')]
+res <- res[order(-res$metric),] #order in descending order
+
+res <-  na.omit(res) #remove rows with na 
+dim(res)
+res <- res[!duplicated(res$symbol),] #remove duplicates
+dim(res)
+
+
+#write the lists - used both as loss of some genes when mapping to gene symbols. No row or col names for .rnk file
+write.table(x,file="~/Documents/MSC_project/data/DESeq_output/Enrichment_Analysis/msc_genes_entrezid.rnk",quote=F,sep="\t",row.names=F, col.names = F)
+
+write.table(res,file="~/Documents/MSC_project/data/DESeq_output/Enrichment_Analysis/msc_genes_symbol.rnk",quote=F,sep="\t",row.names=F, col.names = F)
+
+```
+
+
+Code for plotting GSEA analysis results 
+Read in results of GSEA analysis and plot significant results (p.adj < 0.05)
+
+
+```{r}
+pdf(file="~/Documents/MSC_project/data/DESeq_output/Enrichment_Analysis/sigKEGG_pathways.pdf")
+
+#too many terms so just plot significant ones
+keggp <- fgseaResTidy[fgseaResTidy$padj<0.05,]
+
+ggplot(keggp, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=NES < 0)) +
+  scale_fill_manual(name = '', values = setNames(c("#F46D43","#74ADD1"),c("", "")), guide = NULL) +
+
+ # scale_fill_manual(values = c("#fa624b","#5e61fc"))
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Hallmark pathways NES from GSEA") + 
+  theme_classic() 
+
+dev.off()
+```
+
+

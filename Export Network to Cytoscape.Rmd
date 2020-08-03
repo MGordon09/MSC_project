@@ -1,0 +1,150 @@
+---
+title: "Export Network To Cytoscape"
+author: "Martin Gordon"
+date: "8/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Cytoscape Export 
+
+#Importing turquoise and pink gene modules 
+
+Turquoise module
+Take Intersect of DEGs  (downreg) and Module Genes & Export
+
+```{r}
+modules = 'turquoise'
+
+
+#to visualise gene symbols,  map entrez ids to gene symbols with biomart 
+library(biomaRt)  
+
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl" )
+
+bimart <- getBM(attributes = c("entrezgene_id", 
+                              "external_gene_name"
+                              ), mart = mart)
+
+filter_turquoise <- as.data.frame(filter_turquoise)
+names(filter_turquoise) <- "entrezgene_id"
+filter_turquoise$entrezgene_id <- as.numeric(as.character(filter_turquoise$entrezgene_id)) #numeric to map to bimart id
+filter_turquoise
+
+filter_turquoise_mart <- inner_join(filter_turquoise, bimart, by = "entrezgene_id")
+
+#two duplicate entrez id with slightly different symbols ids, remove one
+filter_turquoise_mart[78,] 
+filter_turquoise_mart[77,] 
+
+filter_turquoise_mart  <- filter_turquoise_mart[-(78),] 
+filter_turquoise_mart
+
+inModule= is.finite(match(gene_names, filter_turquoise_mart$entrezgene_id)) #so this now filters the module by intersect
+
+inModule
+
+modgenes= gene_names[inModule]
+modgenes #gene names in module 
+
+#subset TOM by filtered genes
+modTOM = TOM[inModule, inModule]
+dimnames(modTOM) = list(modgenes, modgenes)
+
+#sanity check.. match after removing dup row in filter df
+modgenes == filter_turquoise_mart$entrezgene_id
+colnames(modTOM) == filter_turquoise_mart$entrezgene_id
+
+```
+
+#threshold imported file (keep most strongly co-expressed)
+```{r}
+cyt_turquoisef = exportNetworkToCytoscape(modTOM,
+  edgeFile=paste("CytoEdge",paste(modules,collapse="-"),".txt",sep=""),
+  nodeFile=paste("CytoNode",paste(modules,collapse="-"),".txt",sep=""),
+  weighted = TRUE, threshold = 0.5,nodeNames=modgenes, 
+  altNodeNames = filter_turquoise_mart$external_gene_name,
+  nodeAttr = mergedColors[inModule]) #attribute for node
+  #set the TOM adj threshold to 0.5  (Langerfelder)
+
+
+#write out node and edge table, wil use these  to construct network
+write.table(cyt_turquoisef$edgeData, file = "/Users/martingordon/Desktop/cyt_turquoiseedge_noMMGS_noTOMfilter.txt", sep = "\t ", row.names = F, col.names = TRUE, quote = F)
+
+write.table(cyt_turquoisef$nodeData, file = "/Users/martingordon/Documents/MSC_project/data/new_WGCNA/cytoscape_input/cyt_turquoisenode_noMMGS_noTOMfilter.txt", sep = "\t ", row.names = F, col.names = TRUE, quote = F)
+
+```
+
+Pink module 
+Take intersect of genes and upregulated genes
+
+```{r}
+modules = 'pink'
+
+filter_pink <- intersect(upreg_genes, mod.pink)
+
+#ID mapper in cytoscape not working well.. map id here first using biomart (need this to import DGE info for visualisation)
+
+
+library(biomaRt)  
+
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl" )
+
+bimart <- getBM(attributes = c("entrezgene_id", 
+                              "external_gene_name"
+                              ), mart = mart)
+
+filter_pink <- as.data.frame(filter_pink)
+names(filter_pink) <- "entrezgene_id"
+filter_pink$entrezgene_id <- as.numeric(as.character(filter_pink$entrezgene_id)) #numeric to map to bimart id
+filter_pink
+
+filter_pink_mart <- inner_join(filter_pink, bimart, by = "entrezgene_id")
+
+#two duplicate entrez id with slightly different symbols ids, remove one
+filter_pink_mart[78,] 
+filter_pink_mart[77,] 
+
+filter_pink_mart  <- filter_pink_mart[-(78),] 
+filter_pink_mart
+
+inModule= is.finite(match(gene_names, filter_pink_mart$entrezgene_id)) #so this now filters the module by intersect
+
+inModule
+
+modgenes= gene_names[inModule]
+modgenes #gene names in module 
+
+#subset TOM by filtered genes
+modTOM = TOM[inModule, inModule]
+dimnames(modTOM) = list(modgenes, modgenes)
+
+#sanity check.. match after removing dup row in filter df
+modgenes == filter_pink_mart$entrezgene_id
+colnames(modTOM) == filter_pink_mart$entrezgene_id
+
+#export the network to cytoscape, will use that for network analysis
+
+cyt_pinkf = exportNetworkToCytoscape(modTOM,
+  edgeFile=paste("CytoEdge",paste(modules,collapse="-"),".txt",sep=""),
+  nodeFile=paste("CytoNode",paste(modules,collapse="-"),".txt",sep=""),
+  weighted = TRUE, threshold = 0.5,nodeNames=modgenes, 
+  altNodeNames = filter_pink_mart$external_gene_name,
+  nodeAttr = mergedColors[inModule]) #attribute for node
+  #set the TOM adj threshold to 0.5  (Langerfelder)
+  # will map entrez_id to gene names in cytoscape
+#attribute for node
+
+```
+
+#threshold imported file (keep most strongly co-expressed)
+```{r}
+#save files for import into cytoscape
+write.table(cyt_pinkf$edgeData, file = "/Users/martingordon/Documents/MSC_project/data/new_WGCNA/cytoscape_input/cyt_pinkedge_noMMGS.txt", sep = "\t ", row.names = F, col.names = TRUE, quote = F)
+
+write.table(cyt_pinkf$nodeData, file = "/Users/martingordon/Documents/MSC_project/data/new_WGCNA/cytoscape_input/cyt_pinknode.txt_noMMGS", sep = "\t ", row.names = F, col.names = TRUE, quote = F)
+
+```

@@ -1,0 +1,371 @@
+---
+title: "STRING_db_analysis"
+author: "Martin Gordon"
+date: "6/27/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## STRINGdb analysis of module genes
+
+take the genes in the modulees/DEG interesction
+pink upreg genes, turquoise downreg
+
+```{r}
+library(STRINGdb)
+library(dplyr)
+library(tibble)
+library(networkD3)
+library(visNetwork)
+library(igraph)
+library(knitr)
+```
+
+
+# Construct String_db network
+
+```{r}
+#read in list of differentially expressed genes 
+#taken from DESeq2 analysis
+up_df
+string_up_df <- up_df[, c(2,5)]
+string_up_df
+
+down_df
+string_down_df <- up_df[, c(2,5)]
+string_down_df
+
+#now subset these by the module overlap from cluster enrichment analysis
+pinkmod_genes_filtered <- cyt_pinkf[["nodeData"]][["nodeName"]]
+pinkmod_genes_filtered
+
+
+string_up_df <- string_up_df[pinkmod_genes_filtered,]
+#dplyr to convert rownmaes to col
+
+string_up_df <- string_up_df %>% rownames_to_column('entrezgene_id')
+string_up_df
+```
+
+#Now try run string on this set
+#Map gene names to the string database using the 'map' method
+
+```{r}
+#version 11, h.sapiens, score threshold is 400 default
+string_db <- STRINGdb$new( version="10", species=9606, score_threshold=400, input_directory="")
+
+#couldnt map 8% of genes to identifiers.. Not found in db so remove
+pink_mapped <- string_db$map(string_up_df, 'entrezgene_id', removeUnmappedRows = T )
+pink_mapped
+
+#only 119 hits (after removing those w/o equilivant STRING identifier) so plot the whole network
+
+#pdf(file = "/Users/martingordon/Documents/MSC_project/data/STRING_module_analysis/pink_wholenetwork")
+string_db$plot_network(pink_mapped$STRING_id)
+
+#dev.off()
+```
+#Payload meechanism; 
+#colour nodes in network by LFC change (red for overexpressed)
+```{r}
+# filter by p-value and add a color column
+#i.e. green down-regulated gened and red for up-regulated genes)
+pink_mapped_pval05 <- string_db$add_diff_exp_color( subset(pink_mapped, padj<0.05), logFcColStr="log2FoldChange" )
+
+payload_id <- string_db$post_payload( pink_mapped_pval05$STRING_id, colors=pink_mapped_pval05$color )
+
+png(file = "/Users/martingordon/Documents/MSC_project/data/STRING_module_analysis/pink_wholenetwork.png")
+string_db$plot_network(pink_mapped$STRING_id, payload_id = payload_id)
+dev.off()
+
+```
+Clustering igraph clustering algorithms to identify clusters 
+```{r}
+# get clusters
+clustersList <- string_db$get_clusters(pink_mapped$STRING_id)
+
+
+png(file = "/Users/martingordon/Documents/MSC_project/data/STRING_module_analysis/pink_networkclusters.png")
+
+par(mfrow=c(2,2))
+for(i in seq(1:4)){
+string_db$plot_network(clustersList[[i]])
+}
+
+dev.off()
+```
+```{r}
+#Get a table of the proteins in the db
+string_proteins <- string_db$get_proteins() #protein names for the string ids
+string_proteins
+
+
+p <- dplyr::select(string_proteins, preferred_name) #extract protein name
+
+proteins <- string_db$map(p, "preferred_name")
+proteins
+
+
+interactions <- string_db$get_interactions(pink_mapped$STRING_id) # protein interactions for genes within pink module
+
+#map gene names to the string id's
+
+for(i in 1:nrow(interactions)){
+  row <- interactions[i,]
+  from <- row$from
+  to <- row$to
+  from_ <- proteins[which(proteins$STRING_id == paste(from)),]
+  to_ <- proteins[which(proteins$STRING_id == paste(to)),]
+  from__ <- from_$preferred_name
+  to__ <- to_$preferred_name
+  interactions$from[i] <- from__
+  interactions$to[i] <- to__
+}
+
+interactions
+
+interactions <- interactions[,c(1,2,16)] #extract to,from and string score
+interactions <- interactions[order(interactions$from),] #order
+colnames(interactions) <- c("from", "to", "width")
+interactions$width <- interactions$width/100 #line width for graph
+```
+#Creating plot
+
+```{r}
+
+pink_nodes <- data.frame(matrix(NA_character_, nrow = nrow(pink_mapped), ncol = 2))
+pink_nodes[,1] <- pink_mapped$STRING_id
+pink_nodes[,2] <- pink_mapped$STRING_id
+
+
+
+colnames(pink_nodes) <- c("id", "label")
+
+#map entrez_id to gene identifiers
+for(i in 1:nrow(pink_nodes)){
+  row <- pink_nodes[i,]
+  id <- row$id
+  label <- row$label
+  id_ <- proteins[which(proteins$STRING_id == paste(id)),] 
+  label_ <- proteins[which(proteins$STRING_id == paste(label)),]
+  id__ <- id_$preferred_name
+  label__ <- label_$preferred_name
+  pink_nodes$id[i] <- id__
+  pink_nodes$label[i] <- label__
+}
+
+#Create group column
+pink_nodes[,"group"] <- "NA"
+
+pink_nodes
+
+
+
+hits <- pink_mapped$STRING_id
+background <- hits 
+string_db$set_background(background) #only the proteins from the module are included in the graph
+
+
+#####   enrichment analysis
+
+enrichment <- string_db$get_enrichment(pink_mapped$STRING_id, category = "KEGG")
+head(enrichment, n=20)
+
+annot <- string_db$get_annotations()
+annot <- merge(annot, enrichment, by="term_id")
+annot <- subset(annot, annot$term_id %in% enrichment$term_id)
+annot <- subset(annot, annot$STRING_id %in% pink_mapped$STRING_id) #subset by genes in pink mod
+annot <- subset(annot, annot$hits >= 4) #only keep terms with 4 or more hits in geneset
+
+
+
+#map gene names to string id
+for(i in 1:nrow(annot)){
+  row <- annot[i,]
+  id <- row$STRING_id
+  id_ <- proteins[which(proteins$STRING_id == paste(id)),] #match string 
+  id__ <- id_$preferred_name
+  annot$STRING_id[i] <- id__
+}
+
+
+annot$STRING_id
+
+outtable <- annot[,c(9,2,7,8)]
+outtable
+DT::datatable(outtable, rownames = FALSE)
+
+#save enrichment results for genes in the module
+write.table(outtable, "/Users/martingordon/Documents/MSC_project/data/STRING_module_analysis/pink_KEGGenrichment.txt", row.names = F, col.names = T, quote=F)
+
+
+annot$Gene <- annot$STRING_id
+#annot2 <- annot[,c(10,9)]
+
+
+
+#map the KEGG pathway genes are associated to for the nodes
+for(i in 1:nrow(pink_nodes)){
+  row <- pink_nodes[i,]
+  gene <- row$id
+  df <- subset(annot, annot$STRING_id %in% paste(gene))
+  vec <- as.vector(df$term_description)
+  pink_nodes$group[i] <- paste(vec, collapse=",")
+}
+
+
+pink_nodes
+annot
+```
+
+
+```{r}
+#Vis Network - Interactive network for visualisation
+
+
+pink_nodes <- na.omit(pink_nodes)
+pink_nodes
+
+
+#edges between
+key <- c(interactions$from, interactions$to)
+pink_nodes <- subset(pink_nodes, pink_nodes$id %in% key)
+
+
+
+#Visualise as interactive network
+
+visNetwork(pink_nodes, interactions, height = "1000px", width = "1000px", main="Pink Module PPI Network") %>% 
+  visOptions(selectedBy = list(variable="group", multiple = TRUE), highlightNearest = list(degree = 2, enabled = T, hover = T, hideColor = "#F0FFFF"), 
+   nodesIdSelection = list(enabled = T,
+                           style = 'width: 200px; height: 26px;
+                                 background: #f8f8f8;
+                                 color: black;
+                                 border:none;
+                                 outline:none;')) %>% 
+  addFontAwesome() %>%
+  visPhysics(maxVelocity = 0.0001, 
+             barnesHut = c(avoidOverlap=1),
+             solver = "forceAtlas2Based",
+               forceAtlas2Based = list(gravitationalConstant = -100)) %>%
+  visLayout(improvedLayout = TRUE) %>%
+visIgraphLayout(layout="layout_on_sphere") %>%
+    visNodes(size = 50,shape = "dot", color = list(background = "#0085AF",border = "black",highlight = "#FF8000"), shadow = list(enabled = T, size = 10), font = c(size=30, bold = T)) %>%
+  visEdges(smooth =F, 
+    shadow = FALSE, width =1,
+    color = list(color = "#B0C4DE", highlight = "#C62F4B"))
+
+?visIgraphLayout
+interactions$w/6
+
+```
+
+
+#do the same for turquoise module 
+
+```{r}
+down_df
+string_down_df <- down_df[, c(2,5)]
+string_down_df
+
+
+#now subset these by the module overlap from cluster enrichment analysis
+turq_genes_filtered <- cyt_turquoisef[["nodeData"]][["nodeName"]]
+turq_genes_filtered
+
+
+string_down_df <- string_down_df[turq_genes_filtered,]
+#dplyr to convert rownmaes to col
+
+string_down_df <- string_down_df %>% rownames_to_column('entrezgene_id')
+string_down_df
+```
+
+
+```{r}
+
+#couldnt map 7% of genes to identifiers.. Not found in db so remove
+turq_mapped <- string_db$map(string_down_df, 'entrezgene_id', removeUnmappedRows = T )
+turq_mapped
+
+#only 174 hits (after removing those w/o equilivant STRING identifier) so plot the whole network
+
+#pdf(file = "/Users/martingordon/Documents/MSC_project/data/STRING_module_analysis/pink_wholenetwork")
+string_db$plot_network(turq_mapped$STRING_id)
+
+#dev.off()
+```
+
+```{r}
+# filter by p-value and add a color column
+#i.e. green down-regulated gened and red for up-regulated genes)
+turquoise_mapped_pval05 <- string_db$add_diff_exp_color( subset(turq_mapped, padj<0.05), logFcColStr="log2FoldChange" )
+
+payload_id <- string_db$post_payload(turquoise_mapped_pval05$STRING_id, colors=turquoise_mapped_pval05$color )
+
+png(file = "/Users/martingordon/Documents/MSC_project/data/STRING_module_analysis/turq_wholenetwork.png")
+string_db$plot_network(turquoise_mapped_pval05$STRING_id, payload_id = payload_id)
+dev.off()
+
+```
+
+#Clustering
+
+```{r}
+# get clusters
+clustersList <- string_db$get_clusters(turq_mapped$STRING_id)
+
+png(file = "/Users/martingordon/Documents/MSC_project/data/STRING_module_analysis/pink_networkclusters.png")
+
+par(mfrow=c(2,2))
+for(i in seq(1:4)){
+string_db$plot_network(clustersList[[i]])
+}
+
+dev.off()
+```
+
+
+#Prepare interactive network 
+
+```{r}
+#Get a table of the proteins in the db
+string_proteins <- string_db$get_proteins() #protein names for the string ids
+string_proteins
+
+
+p <- dplyr::select(string_proteins, preferred_name) #extract protein name
+
+proteins <- string_db$map(p, "preferred_name")
+proteins
+
+
+interactions <- string_db$get_interactions(turq_mapped$STRING_id) # protein interactions for genes within turquoise module
+#no observed interactions for these genes 
+
+#map gene names to the string id's
+
+for(i in 1:nrow(interactions)){
+  row <- interactions[i,]
+  from <- row$from
+  to <- row$to
+  from_ <- proteins[which(proteins$STRING_id == paste(from)),]
+  to_ <- proteins[which(proteins$STRING_id == paste(to)),]
+  from__ <- from_$preferred_name
+  to__ <- to_$preferred_name
+  interactions$from[i] <- from__
+  interactions$to[i] <- to__
+}
+
+interactions
+
+interactions <- interactions[,c(1,2,16)] #extract to,from and string score
+interactions <- interactions[order(interactions$from),] #order
+colnames(interactions) <- c("from", "to", "width")
+interactions$width <- interactions$width/100 #line width for graph
+
+interactions
+```
