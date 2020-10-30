@@ -9,7 +9,6 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Tximport prac
 
 ```{R, messages=F}
 library(tximport)
