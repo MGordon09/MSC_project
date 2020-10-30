@@ -1,0 +1,210 @@
+---
+title: "DESeq2 Import"
+author: "Martin Gordon"
+date: "8/3/2020"
+output: html_document
+---
+
+Files supplied as count data in excel format. 
+Clean up and DESeq2 import
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{R, messages=F}
+library(tximport)
+library(biomaRt)
+library(rio)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(DESeq2)
+library(readxl)
+```
+
+
+```{r}
+samples_eg <- as.data.frame(matrix(data = c(
+  "MCF7_miR-CTRL1.gene.FPKM", "MCF7_miR-CTRL2.gene.FPKM", "MCF7_miR-CTRL3.gene.FPKM","MCF7_miR-CTRL4.gene.FPKM",   "MCF7_miR-D1.gene.FPKM", "MCF7_miR-D2.gene.FPKM", "MCF7_miR-D3.gene.FPKM", "MCF7_miR-D4.gene.FPKM", 
+  "Control", "Control", "Control", "Control", "Mutant",  "Mutant",  "Mutant",  "Mutant",
+   "1",  "2", "3", "4", "1",  "2", "3", "4", 
+  "~/Documents/MSC_project/data/MCF7_miR-CTRL1.gene.FPKM.xls",  "~/Documents/MSC_project/data/MCF7_miR-CTRL2.gene.FPKM.xls",
+  "~/Documents/MSC_project/data/MCF7_miR-CTRL3.gene.FPKM.xls", "~/Documents/MSC_project/data/MCF7_miR-CTRL4.gene.FPKM.xls",
+  "~/Documents/MSC_project/data/MCF7_miR-D1.gene.FPKM.xls", "~/Documents/MSC_project/data/MCF7_miR-D2.gene.FPKM.xls", "~/Documents/MSC_project/data/MCF7_miR-D3.gene.FPKM.xls", "~/Documents/MSC_project/data/MCF7_miR-D4.gene.FPKM.xls"), 
+  nrow=8, ncol=4))
+
+colnames(samples_eg) <- c("Sample", "Condition", "Replicate", "FilePath")
+```
+
+```{r}
+#read & tidy
+
+#keep first gene name
+get_first_item <- function(x){
+  split <- strsplit(x, ",")
+  return(split[[1]][1])
+}
+```
+
+```{r}
+
+#clean up files, write out
+
+samp_n = 0
+
+for (i in samples_eg$FilePath) {
+  
+  samp_n <- samp_n + 1 
+  status <- if (samp_n <= 4) status = "Control" else status = "Mutant"
+  files <- read.csv(i, header=T, sep="\t")
+  colnames(files) <- c("gene_id", "transcript_id", "effective_length", "expected_count", "FPKM")
+  files$transcript_id <- as.character(files$transcript_id)
+   
+    for(j in 1:nrow(files)){
+    
+      row <- files[j,]
+      tx_list <- row$transcript_id
+      item <- get_first_item(tx_list)
+      files[j,2] <- item
+  
+    }
+  
+  #calculate TPM from FPKM; (provided by Colin Dewley of RSEM)
+  #https://groups.google.com/forum/#!topic/rsem-users/W9RQrZIOzA4
+  
+  #have checked values sum to million
+  
+  files$TPM= ( files$FPKM / sum(files$FPKM) * 10^6)
+  
+  myfile <- file.path("~/Desktop/project_prac", paste0('cleaned_MCF7_', status, samp_n, ".csv", sep = ""))
+  #print(myfile)
+  write.table(files, myfile, col.names = T, row.names = F, sep = '\t') 
+}
+
+
+```
+
+```{r}
+
+#read in files 
+setwd("~/Desktop/project_prac")
+
+filenames <- list.files(full.names=TRUE)  
+files  <- lapply(filenames,function(i){
+  read.csv(i, header = T, sep = '\t')
+})
+
+#convert to interger for intersecting 
+lapply(files, function(x) { as.integer(x$gene_id) } )
+
+intersec <- Reduce(intersect, list(files[[1]][["gene_id"]],files[[2]][["gene_id"]],files[[3]][["gene_id"]], files[[4]][["gene_id"]], files[[5]][["gene_id"]],files[[6]][["gene_id"]],files[[7]][["gene_id"]],files[[8]][["gene_id"]]))
+
+#find the intersec of  genes for all files
+intersec_files <- lapply(files, function(x) { x[x$gene_id %in% intersec, ] })
+
+#write to file 
+names(intersec_files) <- c('Control_1', 'Control_2', 'Control_3', 'Control_4', 'Mut_1', 'Mut_2', 'Mut_3', 'Mut_4' )
+lapply(names(intersec_files), function(x) write.table(intersec_files[[x]], file=paste(x,"cleaned_intersect.csv"), sep="\t"))
+
+```
+
+
+```
+
+# The tximport package converts transcript abundance to gene counts
+# make tx2gene
+#biomart interface to access data from public repositories
+# select the refseq_mrna and gene name from the biomart anotation files 
+```{r}
+#biomart ensembl database and human dataset
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")
+
+
+bimrt <- getBM(attributes = c("entrezgene_id", "refseq_mrna", "external_gene_name"), mart = mart)
+
+
+#getting a biomart query and selecting the attributes for gene name and mrna name
+results <- getBM(attributes = c("refseq_mrna", "external_gene_name"), mart = mart)
+
+#change to ensemble_trans
+#results <- getBM(attributes = c("ensembl_transcript_id", "external_gene_name"), mart = mart)
+results
+
+str(results)
+head(results)
+```
+
+# The tximport package converts transcript abundance to gene counts
+```{r}
+tx2gene <- results[, 1:2]
+
+
+quantData <- c(
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/CTRL1_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/CTRL2_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/CTRL3_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/CTRL4_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/MUT1_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/MUT2_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/MUT3_cleaned.xls',
+    '/Users/martingordon/Documents/MSC_project/data/cleaned_files/MUT4_cleaned.xls')
+
+
+files <- file.path(quantData)
+
+files
+
+names(files) <- c("MCF7_Ctrl_1","MCF7_Ctrl_2","MCF7_Ctrl_3", "MCF7_Ctrl_4",  "MCF7_miR.17.92_1", "MCF7_miR.17.92_2", "MCF7_miR.17.92_3", "MCF7_miR.17.92_4")
+
+
+##
+#txi <- tximport(files, type = "none", tx2gene = tx2gene, abundanceCol = "TPM", countsCol = "expected_count", lengthCol = "effective_length",  txIdCol = "transcript_id", importer = function(x) read.csv(x, sep = '\t', header=T))
+
+#tximport command...gene level info 16k genes
+gene_txi <- tximport(files, type = "none", tx2gene = tx2gene,abundanceCol = "TPM", countsCol = "expected_count", lengthCol = "effective_length",  txIdCol = "transcript_id", ignoreTxVersion = T, txIn = F, geneIdCol = 'gene_id', importer = function(x) read_tsv(x, col_names =T))
+
+```
+
+Some QC and DESeq2 Import
+
+```{r}
+
+colnames(gene_txi$counts)
+rownames(sample_table) <- sample_table$Sample
+rownames(sample_table)
+
+#check sample labels to ensure ordered correctly ie. control first level
+levels(sample_table$Condition)
+
+
+#check millions of fragments uniquely aligned to genes in each sample - no large deviances
+round(colSums(gene_txi$counts) / 1e6, 1 )
+
+### Check that sample names match in both files
+all(colnames(gene_txi$counts) %in% rownames(sample_table))
+all(colnames(gene_txi$counts) == rownames(sample_table))
+
+
+dds <- DESeqDataSetFromTximport(txi = gene_txi,
+                                       colData = sample_table,
+                                       design = ~ Condition 
+                                       )
+
+#size factors NULL.. try working straight from rounded matrix of counts ie import directly to DESeq2
+
+countData <- round(gene_txi$counts)
+
+dds <- DESeqDataSetFromMatrix(countData = countData,
+                              colData = sample_table,
+                              design = ~ Condition)
+
+
+#ensure control is the reference
+dds$Condition <- relevel(dds$Condition, ref = "Control")
+dds$Condition
+
+
+```
+
